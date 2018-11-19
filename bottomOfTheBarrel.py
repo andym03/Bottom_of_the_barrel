@@ -3,6 +3,10 @@ from requests.exceptions import RequestException
 from contextlib import closing
 from bs4 import BeautifulSoup
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 import re
 import time
@@ -10,7 +14,7 @@ import pymongo
 
 priceRegex = '\$[0-9]+\.[0-9]+\s'
 
-if __name__ == '__main__':
+def UpdateDanMurphys():
     myclient = pymongo.MongoClient("mongodb://localhost:27017/")
     mydb = myclient["BottomOfTheBarrel"]
     danMurphysDb = mydb["DanMurphys"]
@@ -26,9 +30,12 @@ if __name__ == '__main__':
         driver.get('https://www.danmurphys.com.au/beer/all?page=' + str(pageCount) + '&size=200')
         pageCount += 1
 
-        # Wait for Dan Murphys to call internal API's via javascript. 
-        # TODO: Programme a click on consistent popup. 
-        time.sleep(5)   
+        # Wait for Dan Murphys to call internal API's via javascript.
+        try:
+            myElem = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.CSS_SELECTOR, 'product-list')))
+            print("Page is ready!")
+        except TimeoutException:
+            print("Loading took too much time!")
 
         html = driver.execute_script("return document.body.innerHTML") #returns the inner HTML as a string
         if (re.search('No products found', html)):
@@ -80,6 +87,10 @@ if __name__ == '__main__':
                     if result:
                         beer['Bottle'] = False
                     print(beer)
-                    c = danMurphysDb.insert_one(beer)
+                    danMurphysDb.insert_one(beer)
 
     driver.close()
+
+if __name__ == '__main__':
+   UpdateDanMurphys()
+   print("All done!")
