@@ -76,24 +76,34 @@ def UpdateLiquorLand():
 
         if details:
             extractSizeAndVolume = re.search('[0-9]+\sx\s[0-9]*(mL|L)', details.group(0))
-            isCan = re.search('\s(c|C)an', details.group(0))
-            if isCan:
-                beer['Bottle'] = False
-            else:
-                beer['Bottle'] = True
-        
             extractSizeAndVolume = extractSizeAndVolume.group(0).split()
             size = extractSizeAndVolume[0]
             volume = extractSizeAndVolume[2]
             beer['Prices'][size] = float(sub(r'[^\d.]', '', price.text))
             beer['Volume'] = volume
+
+            expandedDetailsButton = description.find_elements_by_xpath('//a[@class="glyph"]')
+            expandedDetailsButton[0].click()
+            time.sleep(1)
+            expandedDetails = description.find_elements_by_xpath('//div[@class="expandable full-width"]/ul/li/div')
+            for itemKeyIndex in range(0, len(expandedDetails), 3):
+                if expandedDetails[itemKeyIndex].text == "Packaging":
+                    if expandedDetails[itemKeyIndex+2].text == "Bottle":
+                        beer['Bottle'] = True
+                    else:
+                        beer['Bottle'] = False
+                elif expandedDetails[itemKeyIndex].text == "Product Code":
+                    continue
+                else:
+                    beer[expandedDetails[itemKeyIndex].text] = expandedDetails[itemKeyIndex+2].text
+                print("Test" + expandedDetails[itemKeyIndex].text)
+                print("Test" + expandedDetails[itemKeyIndex+2].text)
         else:
             val = float(sub(r'[^\d.]', '', price.text))
             beer['Prices']['1'] = val
 
         beer['Brand'] = brand.text
         beer['Name'] = name.text
-
         beer['ProductPage'] = driver.current_url
 
         print(brand.text)
@@ -195,6 +205,6 @@ def UpdateDanMurphys():
     driver.close()
 
 if __name__ == '__main__':
-   UpdateDanMurphys()
+   #UpdateDanMurphys()
    UpdateLiquorLand()
    print("All done!")
