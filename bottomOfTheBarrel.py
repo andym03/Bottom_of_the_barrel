@@ -194,7 +194,113 @@ def UpdateDanMurphys():
 
     driver.close()
 
+def getBWSProductList(driver):
+    try:
+        WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.CLASS_NAME, 'productTile')))
+        print("Page is ready!")
+    except TimeoutException:
+        print("Loading took too much time!")
+
+    products = driver.find_element_by_class_name("row-card-list")
+    #products = driver.find_element_by_class_name("productTile_brandAndName")
+    #products = driver.find_element(By.CSS_SELECTOR, 'div.productTile:nth-child(1)')
+    #products = products.find_elements_by_tag_name("div")
+
+    return products
+# BWS is easily the most annoying website to go through
+def UpdateBWS():
+    myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+    mydb = myclient[dbName]
+    liquorLandDb = mydb["BWS"]
+    options = new ChromeOptions()
+    options.addArguments("start-maximized")
+    options.addArguments("test-type")
+    options.addArguments("enable-strict-powerful-feature-restrictions")
+    options.addArguments("disable-geolocation")
+    cap.setCapability(ChromeOptions.CAPABILITY, options)
+    cap = cap.merge(DesiredCapabilities.chrome())
+    driver = webdriver.Chrome()
+    pageCount = 1
+    driver.get('https://bws.com.au/beer/craft-beer?sortby=Name&pageNumber=' + str(pageCount))
+    pageCount += 1
+    itemCount = 0
+    i = 0
+
+    time.sleep(5)
+    products = getBWSProductList(driver)
+
+    while itemCount < 60:
+        #products = getBWSProductList(driver)
+        
+        while i < len(products) and products[i].text == '':
+            i += 1
+        
+        if i >= len(products):
+            break
+        
+        products[i].click()
+        itemCount += 1
+
+        try:
+            WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.CLASS_NAME, 'brand_r1')))
+            print("Page is ready!")
+        except TimeoutException:
+            print("Loading took too much time!")
+
+        beer = {}
+        beer['Prices'] = {}
+        
+        brand = driver.find_element_by_class_name("brand_r1")
+        name = driver.find_element_by_class_name("title_r1")
+        price = driver.find_element_by_class_name("price")
+        description = driver.find_element_by_class_name("productDescription")
+
+        details = re.search(r"•.*((B|b)ottle|(C|c)an)", description.text)
+        # Details usually occur after a product description and look like this:
+        # '• Carton of 24 x 355mL Bottles •' however consistency varies. 
+
+        if details:
+            extractSizeAndVolume = re.search('[0-9]+\sx\s[0-9]*(mL|L)', details.group(0))
+            isCan = re.search('\s(c|C)an', details.group(0))
+            if isCan:
+                beer['Bottle'] = False
+            else:
+                beer['Bottle'] = True
+        
+            extractSizeAndVolume = extractSizeAndVolume.group(0).split()
+            size = extractSizeAndVolume[0]
+            volume = extractSizeAndVolume[2]
+            beer['Prices'][size] = float(sub(r'[^\d.]', '', price.text))
+            beer['Volume'] = volume
+        else:
+            val = float(sub(r'[^\d.]', '', price.text))
+            beer['Prices']['1'] = val
+
+        beer['Brand'] = brand.text
+        beer['Name'] = name.text
+
+        beer['ProductPage'] = driver.current_url
+
+        print(brand.text)
+        print(name.text)
+        print(float(sub(r'[^\d.]', '', price.text)))
+        print(size)
+        print(volume)
+        print(str(driver.current_url))
+        liquorLandDb.insert_one(beer)
+        driver.execute_script("window.history.go(-1)")
+
+        if itemCount == 60:
+            itemCount = 0
+            i = -1
+            pageCount += 1
+            driver.get('https://www.liquorland.com.au/Beer?show=60&page=' + str(pageCount))
+        i += 1
+
+    driver.close()
+
 if __name__ == '__main__':
-   UpdateDanMurphys()
-   UpdateLiquorLand()
+   #UpdateDanMurphys()
+   #UpdateLiquorLand()
+   UpdateBWS()
    print("All done!")
