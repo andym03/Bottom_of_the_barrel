@@ -1,6 +1,7 @@
 from requests import get
 from requests.exceptions import RequestException
 from contextlib import closing
+from datetime import date
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
@@ -17,10 +18,11 @@ import pymongo
 priceRegex = '\$[0-9]+\.[0-9]+\s'
 dbName = "BottomOfTheBarrel"
 
+currentDate = str(date.today())
+
 def getLiquorLandProductList(driver):
     try:
         WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.CLASS_NAME, 'productList')))
-        print("Page is ready!")
     except TimeoutException:
         print("Loading took too much time!")
 
@@ -38,7 +40,6 @@ def UpdateLiquorLand():
     driver = webdriver.Chrome()
     pageCount = 1
     driver.get('https://www.liquorland.com.au/Beer?show=60&page=' + str(pageCount))
-    pageCount += 1
     itemCount = 0
     i = 0
 
@@ -64,8 +65,20 @@ def UpdateLiquorLand():
 
         beer = {}
         beer['Prices'] = {}
+        beer['Prices'][currentDate] = {}
         
-        brand = driver.find_element_by_class_name("brand_r1")
+        try:
+            brand = driver.find_element_by_class_name("brand_r1")
+        except:
+            if itemCount == 60:
+                itemCount = 0
+                i = -1
+                pageCount += 1
+                driver.get('https://www.liquorland.com.au/Beer?show=60&page=' + str(pageCount))
+            i += 1
+            driver.get('https://www.liquorland.com.au/Beer?show=60&page=' + str(pageCount))
+            continue
+
         name = driver.find_element_by_class_name("title_r1")
         price = driver.find_element_by_class_name("price")
         description = driver.find_element_by_class_name("productDescription")
@@ -79,7 +92,7 @@ def UpdateLiquorLand():
             extractSizeAndVolume = extractSizeAndVolume.group(0).split()
             size = extractSizeAndVolume[0]
             volume = extractSizeAndVolume[2]
-            beer['Prices'][size] = float(sub(r'[^\d.]', '', price.text))
+            beer['Prices'][currentDate][size] = price.text
             beer['Volume'] = volume
 
             expandedDetailsButton = description.find_elements_by_xpath('//a[@class="glyph"]')
@@ -96,22 +109,12 @@ def UpdateLiquorLand():
                     continue
                 else:
                     beer[expandedDetails[itemKeyIndex].text] = expandedDetails[itemKeyIndex+2].text
-                print("Test" + expandedDetails[itemKeyIndex].text)
-                print("Test" + expandedDetails[itemKeyIndex+2].text)
         else:
-            val = float(sub(r'[^\d.]', '', price.text))
-            beer['Prices']['1'] = val
+            beer['Prices'][currentDate]['1'] = price.text
 
         beer['Brand'] = brand.text
         beer['Name'] = name.text
         beer['ProductPage'] = driver.current_url
-
-        print(brand.text)
-        print(name.text)
-        print(float(sub(r'[^\d.]', '', price.text)))
-        print(size)
-        print(volume)
-        print(str(driver.current_url))
         liquorLandDb.insert_one(beer)
         driver.execute_script("window.history.go(-1)")
 
@@ -123,6 +126,7 @@ def UpdateLiquorLand():
         i += 1
 
     driver.close()
+    
 # Iterates through the DanMurphys Beers product list and extracts data from there,
 # without going deeper into the inidivdual products
 def UpdateDanMurphys():
@@ -204,7 +208,151 @@ def UpdateDanMurphys():
 
     driver.close()
 
+def getBWSProductList(driver):
+    try:
+        WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.CLASS_NAME, 'productTile')))
+        print("Page is ready!")
+    except TimeoutException:
+        print("Loading took too much time!")
+
+    products = driver.find_elements_by_class_name('card')
+
+    return products
+
+# BWS is easily the most annoying website to go through
+def loadBWSPage(driver, pageCount, bwsLink):
+    driver.get(bwsLink + str(pageCount))
+    time.sleep(2)
+    closeButton = driver.find_element_by_xpath("//button[@class='icon--plus icon--remove pull-right']")
+    closeButton.click()
+    return driver
+
+def UpdateBWS():
+    myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+    mydb = myclient[dbName]
+    bwsDB = mydb["BWS"]
+
+    bwsBaseLinks = [
+                    "https://bws.com.au/beer/craft-beer?sortby=Name&pageNumber=",
+                    "https://bws.com.au/beer/imported-beer?sortby=Name&pageNumber=",
+                    "https://bws.com.au/beer/australian-beer?sortby=Name&pageNumber=",
+                    "https://bws.com.au/beer/full-strength-beer?sortby=Name&pageNumber=",
+                    "https://bws.com.au/beer/mid-strength-beer?sortby=Name&pageNumber=",
+                    "https://bws.com.au/beer/light-beer?sortby=Name&pageNumber=",
+                    "https://bws.com.au/beer/low-carb-beer?sortby=Name&pageNumber=",
+                    "https://bws.com.au/beer/cider?sortby=Name&pageNumber="
+                    ]
+
+    bwsBaseLinkCount = 0
+    
+    options = webdriver.ChromeOptions()
+    options.add_argument("start-maximized")
+    options.add_argument("test-type")
+    options.add_argument("enable-strict-powerful-feature-restrictions")
+    options.add_argument("--disable-geolocation")
+    
+    driver = webdriver.Chrome(chrome_options=options)
+    driver.get('chrome://settings/content/location?search=location')
+    time.sleep(4)
+    pageCount = 1
+    driver = loadBWSPage(driver, pageCount, bwsBaseLinks[bwsBaseLinkCount])
+    itemCount = 0
+
+    products = getBWSProductList(driver)
+    maxValues = products.__len__()
+    while bwsBaseLinkCount < len(bwsBaseLinks):
+        while itemCount < maxValues:
+            driver = loadBWSPage(driver, pageCount, bwsBaseLinks[bwsBaseLinkCount])
+            products = getBWSProductList(driver)
+            maxValues = products.__len__()
+            
+            try:
+                WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CLASS_NAME, 'card')))
+                print("Can now Click!")
+            except TimeoutException:
+                print("Can't click!")
+
+
+            products[itemCount].click()
+            itemCount += 1
+
+            if re.search('productgroup', driver.current_url):
+                continue
+
+            try:
+                WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.CLASS_NAME, 'detail-item_brand')))
+                print("Page is ready!")
+            except TimeoutException:
+                print("Loading took too much time!")
+
+            beer = {}
+            beer['Prices'] = {}
+            beer['ProductPage'] = driver.current_url
+
+            item = driver.find_element_by_class_name("detail-item_brand")
+            brandAndName = item.text.split('\n')
+            
+            if len(brandAndName) > 1:
+                beer['Brand'] = brandAndName[0]
+                beer['Name'] = brandAndName[1]
+            else:
+                continue
+            
+            try:
+                price = driver.find_element_by_class_name("product-detail_controls-col")
+            except:
+                # No price available, add name of item to our list
+                bwsDB.insert_one(beer)
+                continue
+
+            allPrices = price.text.split('\n')
+
+            if re.search('.*(b|B)ottle.*', allPrices[0]):
+                beer['Bottle'] = True
+            else:
+                beer['Bottle'] = False
+
+            if len(allPrices) > 1:
+                singlePrice = allPrices[1]
+                decimal = '.' + singlePrice[-2:]
+                singlePrice = singlePrice[:-2] + decimal
+
+                beer['Prices']['1'] = singlePrice
+
+                # ([0-9]*)([0-9][0-9])$ money regex
+                # (\([0-9]+\)) quantity regex
+
+                #Bottle\n$500\nPack (6)\n$2630\nCase (24)\n$6600
+                amountOfItems = '0'
+                for j in range(2, len(allPrices)):
+                    if (re.search('\([0-9]+\)', allPrices[j])):
+                        amountOfItems = allPrices[j][-3:]
+                        amountOfItems = amountOfItems[1:-1]
+                    if (re.search('([0-9]*)([0-9][0-9])$', allPrices[j])):
+                        singlePrice = allPrices[j]
+                        decimal = '.' + singlePrice[-2:]
+                        singlePrice = singlePrice[:-2] + decimal
+                        beer['Prices'][amountOfItems] = singlePrice
+
+            bwsDB.insert_one(beer)
+
+            if (itemCount >= maxValues):
+                pageCount += 1
+                itemCount = 0
+                driver = loadBWSPage(driver, pageCount, bwsBaseLinks[bwsBaseLinkCount])
+                products = getBWSProductList(driver)
+                maxValues = products.__len__()
+                time.sleep(2)
+                if driver.current_url != (bwsBaseLinks[bwsBaseLinkCount] + str(pageCount)):
+                    break
+        bwsBaseLinkCount += 1
+
+
+    driver.close()
+
+
 if __name__ == '__main__':
    #UpdateDanMurphys()
-   UpdateLiquorLand()
+   #UpdateLiquorLand()
+   UpdateBWS()
    print("All done!")
