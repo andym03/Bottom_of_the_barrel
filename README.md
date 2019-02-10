@@ -13,3 +13,9 @@ Currently working for:
 
 Front end hosted here:
 https://github.com/andym03/BottomOfTheBarrel
+
+
+#Current TODO:
+Duplicate protection
+Update existing documents with new price data & maintain history
+Make sure BWS Multi-category scrape is working
